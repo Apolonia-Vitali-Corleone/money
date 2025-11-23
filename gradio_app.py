@@ -13,11 +13,18 @@ from pathlib import Path
 import gradio as gr
 import whisper
 import torch
+import gc
+
+# 设置PyTorch显存分配策略以减少碎片
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
 # 检测GPU可用性
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 if torch.cuda.is_available():
     GPU_INFO = f"✓ 使用GPU加速: {torch.cuda.get_device_name(0)}"
+    # 显示显存信息
+    total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    GPU_INFO += f" ({total_memory:.1f}GB)"
 else:
     GPU_INFO = "⚠ 使用CPU模式（如需GPU加速，请安装CUDA版PyTorch）"
 
@@ -37,26 +44,85 @@ def extract_audio(video_path, audio_path):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def clear_gpu_memory():
+    """清理GPU显存"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+
+
 def transcribe_audio(audio_path, model_path=None):
     """使用Whisper识别音频并生成中文字幕"""
     print("加载Whisper模型...")
     print(f"使用设备: {DEVICE}")
 
-    if model_path and os.path.exists(model_path):
-        # 使用本地模型文件
-        print(f"使用本地模型: {model_path}")
-        model = whisper.load_model(model_path, device=DEVICE)
-    else:
-        # 默认使用base模型
-        print("使用默认base模型")
-        model = whisper.load_model("base", device=DEVICE)
+    # 清理显存
+    clear_gpu_memory()
 
-    print("识别音频中...")
-    # 在GPU上使用FP16以提高速度和减少内存使用
-    fp16 = DEVICE == "cuda"
-    result = model.transcribe(audio_path, language="zh", fp16=fp16)
+    # 显示当前显存使用情况
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated(0) / 1024**3
+        reserved = torch.cuda.memory_reserved(0) / 1024**3
+        print(f"显存使用: 已分配 {allocated:.2f}GB, 已保留 {reserved:.2f}GB")
 
-    return result["segments"]
+    try:
+        if model_path and os.path.exists(model_path):
+            # 使用本地模型文件
+            print(f"使用本地模型: {model_path}")
+            model = whisper.load_model(model_path, device=DEVICE)
+        else:
+            # 默认使用base模型
+            print("使用默认base模型")
+            model = whisper.load_model("base", device=DEVICE)
+
+        print("识别音频中...")
+
+        # 优化参数以减少显存使用
+        # beam_size=1 可以显著减少显存占用（默认是5）
+        # best_of=1 减少候选数量
+        # 在GPU上使用FP16以提高速度和减少内存使用
+        fp16 = DEVICE == "cuda"
+
+        transcribe_options = {
+            "language": "zh",
+            "fp16": fp16,
+            "beam_size": 1,  # 减少beam search的显存占用
+            "best_of": 1,    # 减少候选数量
+        }
+
+        result = model.transcribe(audio_path, **transcribe_options)
+
+        # 处理完成后清理模型
+        del model
+        clear_gpu_memory()
+
+        return result["segments"]
+
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower() or "cuda" in str(e).lower():
+            print(f"\n⚠ GPU显存不足，切换到CPU模式...")
+            print(f"错误详情: {e}")
+
+            # 清理显存
+            clear_gpu_memory()
+
+            # 使用CPU重新加载模型
+            print("使用CPU重新加载模型...")
+            if model_path and os.path.exists(model_path):
+                model = whisper.load_model(model_path, device="cpu")
+            else:
+                model = whisper.load_model("base", device="cpu")
+
+            print("使用CPU识别音频（速度会较慢）...")
+            result = model.transcribe(audio_path, language="zh", fp16=False)
+
+            del model
+            gc.collect()
+
+            return result["segments"]
+        else:
+            # 其他错误直接抛出
+            raise
 
 
 def segments_to_srt(segments, srt_path):
@@ -117,6 +183,9 @@ def process_video(video_path, model_path, progress=gr.Progress()):
         if model_path and not os.path.exists(model_path):
             return None, None, f"❌ 错误：找不到模型文件 {model_path}"
 
+        # 处理前清理显存
+        clear_gpu_memory()
+
         # 设置输出路径
         base_name = Path(video_path).stem
         temp_dir = tempfile.mkdtemp()
@@ -144,13 +213,18 @@ def process_video(video_path, model_path, progress=gr.Progress()):
         if os.path.exists(audio_path):
             os.remove(audio_path)
 
+        # 最后清理显存
+        clear_gpu_memory()
+
         progress(1.0, desc="✓ 完成！")
 
         return output_path, srt_path, "✓ 处理完成！视频和字幕文件已生成。"
 
     except subprocess.CalledProcessError as e:
+        clear_gpu_memory()
         return None, None, f"❌ FFmpeg错误：{str(e)}"
     except Exception as e:
+        clear_gpu_memory()
         return None, None, f"❌ 处理失败：{str(e)}"
 
 
@@ -216,7 +290,8 @@ def create_interface():
         2. **模型路径**（可选）：
            - 如果有本地的Whisper模型文件（如large-v3.pt），输入其完整路径
            - 留空则使用默认的base模型（首次运行会自动下载约140MB）
-           - large-v3模型识别准确率更高，推荐使用
+           - large-v3模型识别准确率更高，但需要更多显存（建议8GB+）
+           - 6GB显存建议使用base或small模型
         3. 点击"开始处理"按钮，等待处理完成
         4. 处理完成后，可以下载带字幕的视频和字幕文件
 
@@ -232,6 +307,10 @@ def create_interface():
         - 确保已安装FFmpeg（Windows用户需要下载并配置环境变量）
         - 处理时间取决于视频长度和模型大小
         - 需要足够的磁盘空间存储临时文件
+        - **显存优化**：程序已启用多项显存优化措施
+          - 自动清理GPU缓存
+          - 降低beam_size以减少显存占用
+          - GPU显存不足时会自动切换到CPU模式
         """)
 
         # 绑定处理函数
