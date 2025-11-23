@@ -2,3 +2,15 @@
 .venv/
 anr_audio.wav
 anr.mp4
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 临时文件
+*_audio.mp3
+*_audio.wav
+*_zh.srt
+*_字幕版.mp4
