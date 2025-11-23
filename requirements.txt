@@ -1,5 +1,6 @@
 openai-whisper
 gradio>=4.0.0
+numpy<2.0.0
 # PyTorch: 使用下面的命令安装CUDA版本以启用GPU加速
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 torch
