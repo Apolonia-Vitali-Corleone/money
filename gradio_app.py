@@ -12,6 +12,18 @@ import shutil
 from pathlib import Path
 import gradio as gr
 import whisper
+import torch
+
+# 检测GPU可用性
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    GPU_INFO = f"✓ 使用GPU加速: {torch.cuda.get_device_name(0)}"
+else:
+    GPU_INFO = "⚠ 使用CPU模式（如需GPU加速，请安装CUDA版PyTorch）"
+
+print("=" * 60)
+print(f"设备信息: {GPU_INFO}")
+print("=" * 60)
 
 
 def extract_audio(video_path, audio_path):
@@ -28,18 +40,21 @@ def extract_audio(video_path, audio_path):
 def transcribe_audio(audio_path, model_path=None):
     """使用Whisper识别音频并生成中文字幕"""
     print("加载Whisper模型...")
+    print(f"使用设备: {DEVICE}")
 
     if model_path and os.path.exists(model_path):
         # 使用本地模型文件
         print(f"使用本地模型: {model_path}")
-        model = whisper.load_model(model_path)
+        model = whisper.load_model(model_path, device=DEVICE)
     else:
         # 默认使用base模型
         print("使用默认base模型")
-        model = whisper.load_model("base")
+        model = whisper.load_model("base", device=DEVICE)
 
     print("识别音频中...")
-    result = model.transcribe(audio_path, language="zh")
+    # 在GPU上使用FP16以提高速度和减少内存使用
+    fp16 = DEVICE == "cuda"
+    result = model.transcribe(audio_path, language="zh", fp16=fp16)
 
     return result["segments"]
 
@@ -149,10 +164,12 @@ def create_interface():
         demo = gr.Blocks(title="视频中文字幕工具")
 
     with demo:
-        gr.Markdown("""
+        gr.Markdown(f"""
         # 🎬 视频中文字幕工具
 
         自动为视频添加中文字幕，使用OpenAI Whisper进行语音识别
+
+        **当前状态**: {GPU_INFO}
         """)
 
         with gr.Row():
