@@ -20,12 +20,19 @@ def extract_audio(video_path, audio_path):
     ]
     subprocess.run(cmd, check=True)
 
-def transcribe_audio(audio_path):
+def transcribe_audio(audio_path, model_path=None):
     """使用Whisper识别音频并生成中文字幕"""
     try:
         import whisper
         print("加载Whisper模型...")
-        model = whisper.load_model("base")
+
+        if model_path and os.path.exists(model_path):
+            # 使用本地模型文件
+            print(f"使用本地模型: {model_path}")
+            model = whisper.load_model(model_path)
+        else:
+            # 默认使用base模型
+            model = whisper.load_model("base")
 
         print("识别音频中...")
         result = model.transcribe(audio_path, language="zh")
@@ -71,13 +78,20 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python add_chinese_subtitle.py <视频文件>")
+        print("用法: python add_chinese_subtitle.py <视频文件> [模型路径]")
         print("示例: python add_chinese_subtitle.py input.mp4")
+        print("      python add_chinese_subtitle.py input.mp4 /path/to/large-v3.pt")
         sys.exit(1)
 
     video_path = sys.argv[1]
+    model_path = sys.argv[2] if len(sys.argv) > 2 else None
+
     if not os.path.exists(video_path):
         print(f"错误: 找不到视频文件 {video_path}")
+        sys.exit(1)
+
+    if model_path and not os.path.exists(model_path):
+        print(f"错误: 找不到模型文件 {model_path}")
         sys.exit(1)
 
     # 设置输出路径
@@ -94,7 +108,7 @@ def main():
 
     # 步骤2: 语音识别生成中文字幕
     print("\n[2/4] 识别语音并生成中文字幕...")
-    segments = transcribe_audio(audio_path)
+    segments = transcribe_audio(audio_path, model_path)
 
     # 步骤3: 生成SRT字幕文件
     print("\n[3/4] 生成字幕文件...")

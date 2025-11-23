@@ -30,11 +30,15 @@ pip install -r requirements.txt
 ### 2. 使用方法
 
 ```bash
-python add_chinese_subtitle.py <视频文件路径>
+python add_chinese_subtitle.py <视频文件路径> [模型路径]
 ```
 
 **示例：**
 ```bash
+# 使用本地large-v3模型（推荐，不需要下载）
+python add_chinese_subtitle.py video.mp4 /path/to/large-v3.pt
+
+# 或使用默认base模型（首次会自动下载）
 python add_chinese_subtitle.py video.mp4
 ```
 
@@ -54,8 +58,10 @@ python add_chinese_subtitle.py video.mp4
 
 ## 注意事项
 
-- 首次运行会下载Whisper模型（约140MB）
-- 处理时间取决于视频长度
+- **推荐使用本地模型**：如果你已有 `large-v3.pt` 模型文件，直接指定路径即可，无需下载
+- 如不指定模型路径，首次运行会自动下载base模型（约140MB）
+- large-v3 模型识别准确率更高，适合生产使用
+- 处理时间取决于视频长度和模型大小
 - 需要足够的磁盘空间存储临时音频文件
 
 ## 许可
