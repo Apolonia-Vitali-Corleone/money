@@ -141,7 +141,14 @@ def process_video(video_path, model_path, progress=gr.Progress()):
 
 # 创建Gradio界面
 def create_interface():
-    with gr.Blocks(title="视频中文字幕工具", theme=gr.themes.Soft()) as demo:
+    # 兼容不同版本的Gradio
+    try:
+        demo = gr.Blocks(title="视频中文字幕工具", theme=gr.themes.Soft())
+    except TypeError:
+        # 旧版本Gradio不支持theme参数
+        demo = gr.Blocks(title="视频中文字幕工具")
+
+    with demo:
         gr.Markdown("""
         # 🎬 视频中文字幕工具
 
