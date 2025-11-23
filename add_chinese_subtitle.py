@@ -80,7 +80,7 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python add_chinese_subtitle.py <视频文件> [模型路径]")
         print("示例: python add_chinese_subtitle.py input.mp4")
-        print("      python add_chinese_subtitle.py input.mp4 /path/to/large-v3.pt")
+        print("     python add_chinese_subtitle.py input.mp4 /path/to/large-v3.pt")
         sys.exit(1)
 
     video_path = sys.argv[1]
