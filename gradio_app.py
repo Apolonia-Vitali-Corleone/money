@@ -70,7 +70,7 @@ def submit_transcription_task(file_url, access_key_id, access_key_secret, app_ke
     request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
     request.set_version('2018-08-17')
     request.set_action_name('SubmitTask')
-    request.set_protocol('https')
+    request.set_protocol_type('https')
 
     # 设置请求参数
     task_params = {
@@ -106,7 +106,7 @@ def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='
         request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
         request.set_version('2018-08-17')
         request.set_action_name('GetTaskResult')
-        request.set_protocol('https')
+        request.set_protocol_type('https')
         request.add_query_param('TaskId', task_id)
 
         # 发送请求
