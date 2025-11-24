@@ -19,9 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 try:
-    from aliyunsdkcore.client import AcsClient
-    from aliyunsdkcore.request import CommonRequest
-    import oss2
+    from aliyun_transcription import AliyunTranscription
 except ImportError as e:
     print("=" * 60)
     print("❌ 错误: 缺少必要的依赖库")
@@ -30,12 +28,6 @@ except ImportError as e:
     print("  pip install aliyun-python-sdk-core oss2")
     print("=" * 60)
     sys.exit(1)
-
-
-def check_network_connectivity(region='cn-shanghai'):
-    """检查与阿里云服务的网络连接（已禁用DNS预检查）"""
-    # 跳过DNS预检查，直接让SDK尝试连接
-    pass
 
 
 def get_audio_duration(audio_path):
@@ -65,153 +57,6 @@ def extract_audio(video_path, audio_path):
         raise Exception(f"FFmpeg提取音频失败: {result.stderr.decode()}")
 
 
-def upload_to_oss(audio_path, access_key_id, access_key_secret, bucket_name, region='cn-shanghai'):
-    """上传音频文件到阿里云OSS"""
-    # 创建OSS客户端
-    auth = oss2.Auth(access_key_id, access_key_secret)
-    endpoint = f'https://oss-{region}.aliyuncs.com'
-    bucket = oss2.Bucket(auth, endpoint, bucket_name)
-
-    # 生成唯一的对象名称
-    object_name = f"audio/{int(time.time())}_{Path(audio_path).name}"
-
-    # 上传文件
-    bucket.put_object_from_file(object_name, audio_path)
-
-    # 生成带签名的临时访问URL（有效期1小时）
-    # 使用签名URL可以让语音识别服务访问私有OSS文件
-    file_url = bucket.sign_url('GET', object_name, 3600)
-    return file_url, object_name
-
-
-def submit_transcription_task(file_url, access_key_id, access_key_secret, app_key, region='cn-shanghai'):
-    """提交语音识别任务到阿里云（带重试机制）"""
-    # 创建客户端，设置超时时间
-    client = AcsClient(
-        access_key_id,
-        access_key_secret,
-        region,
-        timeout=90,  # 设置超时时间
-    )
-
-    # 设置重试次数
-    max_retries = 3
-    retry_delay = 2
-
-    for attempt in range(max_retries):
-        try:
-            # 创建POST请求
-            request = CommonRequest()
-            request.set_method('POST')
-            request.set_domain(f'filetrans.{region}.aliyuncs.com')
-            request.set_version('2018-08-17')
-            request.set_action_name('SubmitTask')
-            request.set_protocol_type('https')
-
-            # 设置请求参数
-            task_params = {
-                "appkey": app_key,
-                "file_link": file_url,
-                "version": "4.0",
-                "enable_words": False
-            }
-
-            request.add_body_params('Task', json.dumps(task_params))
-
-            # 发送请求
-            response = client.do_action_with_exception(request)
-            result = json.loads(response)
-
-            if result.get('StatusCode') != 21050000:
-                raise Exception(f"提交任务失败: {result.get('StatusText')}")
-
-            return result.get('TaskId')
-
-        except Exception as e:
-            error_msg = str(e)
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            else:
-                raise Exception(f"提交任务失败（已重试{max_retries}次）: {error_msg}")
-
-
-def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='cn-shanghai', audio_duration=None, progress_callback=None):
-    """等待识别任务完成（带重试机制，动态超时，进度回调）"""
-    # 创建客户端，设置超时时间
-    client = AcsClient(
-        access_key_id,
-        access_key_secret,
-        region,
-        timeout=90,  # 设置超时时间
-    )
-
-    # 动态计算超时时间：音频时长 × 3 + 60秒缓冲，最小120秒，最大300秒
-    if audio_duration:
-        max_wait_time = max(120, min(300, int(audio_duration * 3 + 60)))
-    else:
-        max_wait_time = 300  # 默认5分钟
-
-    poll_interval = 3  # 每3秒查询一次（优化响应速度）
-    max_poll_retries = max_wait_time // poll_interval
-    poll_count = 0
-
-    while poll_count < max_poll_retries:
-        query_retries = 3
-        query_success = False
-
-        for attempt in range(query_retries):
-            try:
-                # 创建GET请求
-                request = CommonRequest()
-                request.set_method('GET')
-                request.set_domain(f'filetrans.{region}.aliyuncs.com')
-                request.set_version('2018-08-17')
-                request.set_action_name('GetTaskResult')
-                request.set_protocol_type('https')
-                request.add_query_param('TaskId', task_id)
-
-                # 发送请求
-                response = client.do_action_with_exception(request)
-                result = json.loads(response)
-                query_success = True
-
-                status_code = result.get('StatusCode')
-
-                if status_code == 21050002:  # 成功
-                    if progress_callback:
-                        progress_callback(0.7, desc="✓ 识别完成！")
-                    return result.get('Result')
-                elif status_code == 21050003:  # 失败
-                    raise Exception(f"识别任务失败: {result.get('StatusText')}")
-                elif status_code == 21050000:  # 进行中
-                    elapsed_time = poll_count * poll_interval
-                    # 进度从 0.5 到 0.7，根据已等待时间计算
-                    progress_ratio = min(0.95, elapsed_time / max_wait_time)
-                    progress_value = 0.5 + (progress_ratio * 0.2)  # 0.5 到 0.7 区间
-
-                    if progress_callback:
-                        progress_callback(
-                            progress_value,
-                            desc=f"[4/5] 等待识别完成... {elapsed_time}秒/{max_wait_time}秒"
-                        )
-                    break
-                else:
-                    raise Exception(f"未知状态码 {status_code}: {result.get('StatusText')}")
-
-            except Exception as e:
-                if attempt < query_retries - 1:
-                    time.sleep(2)
-                else:
-                    raise Exception(f"查询任务状态失败（已重试{query_retries}次）: {str(e)}")
-
-        if query_success:
-            time.sleep(poll_interval)
-            poll_count += 1
-        else:
-            break
-
-    raise Exception(f"识别任务超时（等待时间超过{max_wait_time}秒）")
 
 
 def parse_result_to_srt(result_json, srt_path):
@@ -265,15 +110,6 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
         raise Exception(f"FFmpeg烧录字幕失败: {result.stderr.decode()}")
 
 
-def cleanup_oss(access_key_id, access_key_secret, bucket_name, object_name, region='cn-shanghai'):
-    """清理OSS上的临时文件"""
-    try:
-        auth = oss2.Auth(access_key_id, access_key_secret)
-        endpoint = f'https://oss-{region}.aliyuncs.com'
-        bucket = oss2.Bucket(auth, endpoint, bucket_name)
-        bucket.delete_object(object_name)
-    except Exception:
-        pass  # 忽略清理错误
 
 
 def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_name, region, progress=gr.Progress()):
@@ -294,8 +130,6 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         srt_path: 字幕文件路径
         status_message: 处理状态消息
     """
-    object_name = None
-
     try:
         # 验证输入
         if not video_path or not os.path.exists(video_path):
@@ -311,9 +145,15 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         srt_path = os.path.join(temp_dir, f"{base_name}_zh.srt")
         output_path = os.path.join(temp_dir, f"{base_name}_字幕版.mp4")
 
-        # 步骤0: 检查网络连接
-        progress(0.05, desc="[0/5] 检查网络连接...")
-        check_network_connectivity(region)
+        # 创建阿里云语音识别客户端
+        progress(0.05, desc="[0/5] 初始化阿里云客户端...")
+        transcription = AliyunTranscription(
+            access_key_id=access_key_id,
+            access_key_secret=access_key_secret,
+            app_key=app_key,
+            bucket_name=bucket_name,
+            region=region
+        )
 
         # 步骤1: 提取音频
         progress(0.1, desc="[1/5] 提取音频...")
@@ -322,24 +162,18 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         # 获取音频时长（用于动态设置超时）
         audio_duration = get_audio_duration(audio_path)
 
-        # 步骤2: 上传到OSS
-        progress(0.2, desc="[2/5] 上传音频到阿里云OSS...")
-        file_url, object_name = upload_to_oss(
-            audio_path, access_key_id, access_key_secret, bucket_name, region
-        )
+        # 步骤2: 生成固定的OSS对象名称（基于视频文件哈希）
+        progress(0.2, desc="[2/5] 准备上传音频...")
+        object_name = transcription.get_audio_object_name(video_path)
 
-        # 步骤3: 提交识别任务
-        progress(0.3, desc="[3/5] 提交语音识别任务...")
-        task_id = submit_transcription_task(
-            file_url, access_key_id, access_key_secret, app_key, region
-        )
+        # 步骤3: 上传到OSS（如果已存在则跳过）
+        progress(0.25, desc="[3/5] 上传音频到OSS...")
+        file_url = transcription.upload_audio_to_oss(audio_path, object_name)
 
-        # 步骤4: 等待任务完成（带动态进度更新）
-        progress(0.5, desc="[4/5] 等待识别任务完成...")
-        result_json = wait_for_task_completion(
-            task_id, access_key_id, access_key_secret, region,
-            audio_duration, progress_callback=progress
-        )
+        # 步骤4: 提交识别任务并等待完成
+        progress(0.3, desc="[4/5] 提交识别任务...")
+        result_json = transcription.transcribe_file(file_url, audio_duration)
+        progress(0.7, desc="✓ 识别完成！")
 
         # 步骤5: 生成SRT字幕文件
         progress(0.7, desc="[5/5] 生成字幕文件...")
@@ -353,22 +187,11 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         if os.path.exists(audio_path):
             os.remove(audio_path)
 
-        # 清理OSS文件
-        if object_name:
-            cleanup_oss(access_key_id, access_key_secret, bucket_name, object_name, region)
-
         progress(1.0, desc="✓ 完成！")
 
         return output_path, srt_path, "✓ 处理完成！视频和字幕文件已生成。"
 
     except Exception as e:
-        # 尝试清理
-        if object_name:
-            try:
-                cleanup_oss(access_key_id, access_key_secret, bucket_name, object_name, region)
-            except:
-                pass
-
         return None, None, f"❌ 处理失败：{str(e)}"
 
 
