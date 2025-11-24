@@ -10,7 +10,6 @@ import sys
 import json
 import time
 import subprocess
-import socket
 from pathlib import Path
 
 try:
