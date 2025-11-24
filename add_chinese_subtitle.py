@@ -130,8 +130,21 @@ def submit_transcription_task(file_url, access_key_id, access_key_secret, app_ke
                 raise Exception(f"提交任务失败（已重试{max_retries}次）: {error_msg}")
 
 
-def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='cn-shanghai'):
-    """等待识别任务完成（带重试机制）"""
+def get_audio_duration(audio_path):
+    """获取音频文件时长（秒）"""
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+               '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return float(result.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='cn-shanghai', audio_duration=None):
+    """等待识别任务完成（带重试机制，动态超时）"""
     print("[4/5] 等待识别任务完成...")
 
     # 创建客户端，设置超时时间
@@ -142,8 +155,15 @@ def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='
         timeout=90,  # 设置超时时间
     )
 
-    max_wait_time = 600  # 最多等待10分钟
-    poll_interval = 5     # 每5秒查询一次
+    # 动态计算超时时间：音频时长 × 3 + 60秒缓冲，最小120秒，最大300秒
+    if audio_duration:
+        max_wait_time = max(120, min(300, int(audio_duration * 3 + 60)))
+        print(f"  音频时长: {audio_duration:.1f}秒，设置超时: {max_wait_time}秒")
+    else:
+        max_wait_time = 300  # 默认5分钟
+        print(f"  未获取音频时长，使用默认超时: {max_wait_time}秒")
+
+    poll_interval = 3     # 每3秒查询一次（优化响应速度）
     max_poll_retries = max_wait_time // poll_interval
     poll_count = 0
 
@@ -177,10 +197,11 @@ def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='
                     raise Exception(f"识别任务失败: {result.get('StatusText')}")
                 elif status_code == 21050000:  # 进行中
                     elapsed_time = poll_count * poll_interval
-                    print(f"  等待中... ({elapsed_time}秒 / {max_wait_time}秒)", end='\r')
+                    progress_pct = min(95, int((elapsed_time / max_wait_time) * 100))
+                    print(f"  等待中... {elapsed_time}秒 / {max_wait_time}秒 ({progress_pct}%)", end='\r')
                     break  # 跳出重试循环，继续等待
                 else:
-                    raise Exception(f"未知状态: {result.get('StatusText')}")
+                    raise Exception(f"未知状态码 {status_code}: {result.get('StatusText')}")
 
             except Exception as e:
                 if attempt < query_retries - 1:
@@ -345,6 +366,9 @@ def main():
         # 步骤1: 提取音频
         extract_audio(video_path, audio_path)
 
+        # 获取音频时长（用于动态设置超时）
+        audio_duration = get_audio_duration(audio_path)
+
         # 步骤2: 上传到OSS
         file_url, object_name = upload_to_oss(
             audio_path, access_key_id, access_key_secret, bucket_name, region
@@ -357,7 +381,7 @@ def main():
 
         # 步骤4: 等待任务完成
         result_json = wait_for_task_completion(
-            task_id, access_key_id, access_key_secret, region
+            task_id, access_key_id, access_key_secret, region, audio_duration
         )
 
         # 步骤5: 生成SRT字幕文件
