@@ -99,7 +99,16 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
     print("\n将字幕烧录到视频中...")
 
     # 转义字幕路径（Windows兼容）
-    srt_path_escaped = srt_path.replace('\\', '/').replace(':', '\\:')
+    # 将反斜杠替换为正斜杠
+    srt_path_normalized = srt_path.replace('\\', '/')
+
+    # Windows路径需要转义盘符冒号（C: → C\\:）
+    if len(srt_path_normalized) > 1 and srt_path_normalized[1] == ':':
+        # 盘符冒号需要双反斜杠转义
+        srt_path_escaped = srt_path_normalized[0] + '\\\\:' + srt_path_normalized[2:]
+    else:
+        # Unix路径或相对路径，转义所有冒号
+        srt_path_escaped = srt_path_normalized.replace(':', '\\:')
 
     cmd = [
         'ffmpeg', '-i', video_path,
