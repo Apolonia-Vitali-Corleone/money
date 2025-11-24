@@ -51,8 +51,16 @@ def parse_result_to_srt(result_json, srt_path):
     print("[5/5] 生成SRT字幕文件...")
 
     import json
-    # 解析JSON结果
-    result = json.loads(result_json)
+    # 解析JSON结果（兼容不同的数据类型）
+    if isinstance(result_json, dict):
+        result = result_json
+    elif isinstance(result_json, str):
+        result = json.loads(result_json)
+    elif isinstance(result_json, bytes):
+        result = json.loads(result_json.decode('utf-8'))
+    else:
+        raise TypeError(f"不支持的结果类型: {type(result_json)}")
+
     sentences = result.get('Sentences', [])
 
     if not sentences:
