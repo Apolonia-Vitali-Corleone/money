@@ -15,6 +15,12 @@ import socket
 from pathlib import Path
 import gradio as gr
 
+# 应用DNS修复补丁（解决socket.gethostbyname失败的问题）
+try:
+    import dns_fix
+except Exception as e:
+    print(f"⚠ DNS修复模块加载失败: {e}")
+
 try:
     from aliyunsdkcore.client import AcsClient
     from aliyunsdkcore.request import CommonRequest
