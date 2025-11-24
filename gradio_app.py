@@ -14,6 +14,9 @@ import tempfile
 import socket
 from pathlib import Path
 import gradio as gr
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from aliyunsdkcore.client import AcsClient
@@ -414,7 +417,7 @@ def create_interface():
 
                 bucket_name_input = gr.Textbox(
                     label="OSS存储桶名称",
-                    value=default_config.get("bucket_name", "money-oss"),
+                    value=default_config.get("OSS_BUCKET_NAME", "money-oss"),
                     placeholder="例如: my-bucket"
                 )
 
