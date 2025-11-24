@@ -38,7 +38,8 @@ def check_network_connectivity(region='cn-shanghai'):
     try:
         socket.gethostbyname(nls_domain)
     except socket.gaierror as e:
-        raise Exception(f"无法解析阿里云NLS服务域名: {nls_domain}。\n可能原因：\n1. 网络连接问题\n2. DNS服务器问题\n3. 防火墙/代理设置\n4. 地域设置错误（当前: {region}）")
+        raise Exception(
+            f"无法解析阿里云NLS服务域名: {nls_domain}。\n可能原因：\n1. 网络连接问题\n2. DNS服务器问题\n3. 防火墙/代理设置\n4. 地域设置错误（当前: {region}）")
 
     try:
         socket.gethostbyname(oss_domain)
@@ -349,12 +350,12 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
 def create_interface():
     # 加载配置文件
     default_config = {
-        "video_path": "",
-        "access_key_id": "",
-        "access_key_secret": "",
-        "app_key": "",
-        "bucket_name": "",
-        "region": "cn-shanghai"
+        "video_path": os.getenv("FILE_PATH"),
+        "access_key_id": os.getenv("ACCESS_KEY_ID"),
+        "access_key_secret": os.getenv("ACCESS_KEY_SECRET"),
+        "app_key": os.getenv("APP_KEY"),
+        "bucket_name": os.getenv("BUCKET_NAME"),
+        "region": os.getenv("REGION"),
     }
 
     config_path = Path(__file__).parent / "config.json"
@@ -384,7 +385,7 @@ def create_interface():
 
                 video_input = gr.Textbox(
                     label="视频文件路径",
-                    value=default_config.get("video_path", ""),
+                    value=default_config.get("video_path"),
                     placeholder=r"例如: C:\Users\YourName\Videos\video.mp4",
                     info="输入完整的视频文件路径"
                 )
@@ -393,7 +394,7 @@ def create_interface():
 
                 access_key_id_input = gr.Textbox(
                     label="AccessKey ID",
-                    value=default_config.get("access_key_id", ""),
+                    value=default_config.get("access_key_id", os.getenv("ACCESS_KEY_SECRET", "")),
                     placeholder="您的阿里云AccessKey ID",
                     type="password"
                 )
@@ -407,13 +408,13 @@ def create_interface():
 
                 app_key_input = gr.Textbox(
                     label="语音识别AppKey",
-                    value=default_config.get("app_key", ""),
+                    value=default_config.get("app_key", os.getenv("APP_KEY", "")),
                     placeholder="语音识别应用的AppKey"
                 )
 
                 bucket_name_input = gr.Textbox(
                     label="OSS存储桶名称",
-                    value=default_config.get("bucket_name", ""),
+                    value=default_config.get("bucket_name", "money-oss"),
                     placeholder="例如: my-bucket"
                 )
 
@@ -469,9 +470,9 @@ if __name__ == "__main__":
     demo = create_interface()
     demo.launch(
         server_name="0.0.0.0",  # 允许外部访问
-        server_port=19977,       # 指定端口
-        share=False,             # 不创建公共链接
-        inbrowser=False          # 不自动打开浏览器
+        server_port=19977,  # 指定端口
+        share=False,  # 不创建公共链接
+        inbrowser=False  # 不自动打开浏览器
     )
 
     print("🚀 Gradio应用已启动，访问地址：http://localhost:19977")
