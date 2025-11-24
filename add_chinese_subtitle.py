@@ -10,6 +10,7 @@ import sys
 import json
 import time
 import subprocess
+import socket
 from pathlib import Path
 
 try:
@@ -19,6 +20,37 @@ except ImportError:
     print("❌ 错误: 需要安装阿里云SDK")
     print("运行: pip install aliyun-python-sdk-core")
     sys.exit(1)
+
+
+def check_network_connectivity(region='cn-shanghai'):
+    """检查与阿里云服务的网络连接"""
+    print("🔍 检查网络连接...")
+
+    # 检查DNS解析
+    nls_domain = f'nls-filetrans.{region}.aliyuncs.com'
+    oss_domain = f'oss-{region}.aliyuncs.com'
+
+    try:
+        print(f"  检查DNS解析: {nls_domain}")
+        ip = socket.gethostbyname(nls_domain)
+        print(f"  ✓ NLS服务DNS解析成功: {ip}")
+    except socket.gaierror as e:
+        print(f"  ❌ NLS服务DNS解析失败: {e}")
+        print(f"\n可能的原因：")
+        print(f"  1. 网络连接问题 - 请检查网络连接是否正常")
+        print(f"  2. DNS服务器问题 - 尝试更换DNS服务器（如8.8.8.8）")
+        print(f"  3. 防火墙/代理 - 检查防火墙或代理设置")
+        print(f"  4. 地域设置错误 - 当前地域: {region}")
+        raise Exception(f"无法解析阿里云NLS服务域名: {nls_domain}")
+
+    try:
+        print(f"  检查DNS解析: {oss_domain}")
+        ip = socket.gethostbyname(oss_domain)
+        print(f"  ✓ OSS服务DNS解析成功: {ip}")
+    except socket.gaierror as e:
+        print(f"  ⚠ OSS服务DNS解析失败: {e}")
+
+    print("  ✓ 网络连接检查完成\n")
 
 
 def extract_audio(video_path, audio_path):
@@ -64,79 +96,131 @@ def upload_to_oss(audio_path, access_key_id, access_key_secret, bucket_name, reg
 
 
 def submit_transcription_task(file_url, access_key_id, access_key_secret, app_key, region='cn-shanghai'):
-    """提交语音识别任务到阿里云"""
+    """提交语音识别任务到阿里云（带重试机制）"""
     print("[3/5] 提交语音识别任务...")
 
-    client = AcsClient(access_key_id, access_key_secret, region)
+    # 创建客户端，设置超时时间（连接超时30秒，读取超时90秒）
+    client = AcsClient(
+        access_key_id,
+        access_key_secret,
+        region,
+        timeout=90,  # 设置超时时间
+    )
 
-    # 创建POST请求
-    request = CommonRequest()
-    request.set_method('POST')
-    request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
-    request.set_version('2018-08-17')
-    request.set_action_name('SubmitTask')
-    request.set_protocol_type('https')
+    # 设置重试次数
+    max_retries = 3
+    retry_delay = 2  # 初始重试延迟（秒）
 
-    # 设置请求参数
-    task_params = {
-        "appkey": app_key,
-        "file_link": file_url,
-        "version": "4.0",
-        "enable_words": False
-    }
+    for attempt in range(max_retries):
+        try:
+            # 创建POST请求
+            request = CommonRequest()
+            request.set_method('POST')
+            request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
+            request.set_version('2018-08-17')
+            request.set_action_name('SubmitTask')
+            request.set_protocol_type('https')
 
-    request.add_body_params('Task', json.dumps(task_params))
+            # 设置请求参数
+            task_params = {
+                "appkey": app_key,
+                "file_link": file_url,
+                "version": "4.0",
+                "enable_words": False
+            }
 
-    # 发送请求
-    response = client.do_action_with_exception(request)
-    result = json.loads(response)
+            request.add_body_params('Task', json.dumps(task_params))
 
-    if result.get('StatusCode') != 21050000:
-        raise Exception(f"提交任务失败: {result.get('StatusText')}")
+            # 发送请求
+            print(f"  尝试提交任务... (尝试 {attempt + 1}/{max_retries})")
+            response = client.do_action_with_exception(request)
+            result = json.loads(response)
 
-    task_id = result.get('TaskId')
-    print(f"✓ 任务已提交，任务ID: {task_id}")
-    return task_id
+            if result.get('StatusCode') != 21050000:
+                raise Exception(f"提交任务失败: {result.get('StatusText')}")
+
+            task_id = result.get('TaskId')
+            print(f"✓ 任务已提交，任务ID: {task_id}")
+            return task_id
+
+        except Exception as e:
+            error_msg = str(e)
+            if attempt < max_retries - 1:
+                print(f"  ⚠ 提交失败: {error_msg}")
+                print(f"  等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 指数退避
+            else:
+                print(f"  ❌ 提交任务最终失败")
+                raise Exception(f"提交任务失败（已重试{max_retries}次）: {error_msg}")
 
 
 def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='cn-shanghai'):
-    """等待识别任务完成"""
+    """等待识别任务完成（带重试机制）"""
     print("[4/5] 等待识别任务完成...")
 
-    client = AcsClient(access_key_id, access_key_secret, region)
+    # 创建客户端，设置超时时间
+    client = AcsClient(
+        access_key_id,
+        access_key_secret,
+        region,
+        timeout=90,  # 设置超时时间
+    )
 
-    max_retries = 60  # 最多等待5分钟
-    retry_count = 0
+    max_wait_time = 600  # 最多等待10分钟
+    poll_interval = 5     # 每5秒查询一次
+    max_poll_retries = max_wait_time // poll_interval
+    poll_count = 0
 
-    while retry_count < max_retries:
-        # 创建GET请求
-        request = CommonRequest()
-        request.set_method('GET')
-        request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
-        request.set_version('2018-08-17')
-        request.set_action_name('GetTaskResult')
-        request.set_protocol_type('https')
-        request.add_query_param('TaskId', task_id)
+    while poll_count < max_poll_retries:
+        # 每次查询都有重试机制
+        query_retries = 3
+        query_success = False
 
-        # 发送请求
-        response = client.do_action_with_exception(request)
-        result = json.loads(response)
+        for attempt in range(query_retries):
+            try:
+                # 创建GET请求
+                request = CommonRequest()
+                request.set_method('GET')
+                request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
+                request.set_version('2018-08-17')
+                request.set_action_name('GetTaskResult')
+                request.set_protocol_type('https')
+                request.add_query_param('TaskId', task_id)
 
-        status_code = result.get('StatusCode')
+                # 发送请求
+                response = client.do_action_with_exception(request)
+                result = json.loads(response)
+                query_success = True
 
-        if status_code == 21050002:  # 成功
-            print("✓ 识别完成！")
-            return result.get('Result')
-        elif status_code == 21050003:  # 失败
-            raise Exception(f"识别任务失败: {result.get('StatusText')}")
-        elif status_code == 21050000:  # 进行中
-            print(f"  等待中... ({retry_count * 5}秒)", end='\r')
-            time.sleep(5)
-            retry_count += 1
+                status_code = result.get('StatusCode')
+
+                if status_code == 21050002:  # 成功
+                    print("\n✓ 识别完成！")
+                    return result.get('Result')
+                elif status_code == 21050003:  # 失败
+                    raise Exception(f"识别任务失败: {result.get('StatusText')}")
+                elif status_code == 21050000:  # 进行中
+                    elapsed_time = poll_count * poll_interval
+                    print(f"  等待中... ({elapsed_time}秒 / {max_wait_time}秒)", end='\r')
+                    break  # 跳出重试循环，继续等待
+                else:
+                    raise Exception(f"未知状态: {result.get('StatusText')}")
+
+            except Exception as e:
+                if attempt < query_retries - 1:
+                    print(f"\n  ⚠ 查询失败，重试中... ({attempt + 1}/{query_retries})")
+                    time.sleep(2)
+                else:
+                    raise Exception(f"查询任务状态失败（已重试{query_retries}次）: {str(e)}")
+
+        if query_success:
+            time.sleep(poll_interval)
+            poll_count += 1
         else:
-            raise Exception(f"未知状态: {result.get('StatusText')}")
+            break
 
-    raise Exception("识别任务超时")
+    raise Exception(f"识别任务超时（等待时间超过{max_wait_time}秒）")
 
 
 def parse_result_to_srt(result_json, srt_path):
@@ -280,6 +364,9 @@ def main():
     object_name = None
 
     try:
+        # 步骤0: 检查网络连接
+        check_network_connectivity(region)
+
         # 步骤1: 提取音频
         extract_audio(video_path, audio_path)
 
