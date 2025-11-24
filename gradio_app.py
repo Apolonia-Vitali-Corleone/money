@@ -280,6 +280,24 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
 
 # 创建Gradio界面
 def create_interface():
+    # 加载配置文件
+    default_config = {
+        "video_path": "",
+        "access_key_id": "",
+        "access_key_secret": "",
+        "app_key": "",
+        "bucket_name": "",
+        "region": "cn-shanghai"
+    }
+
+    config_path = Path(__file__).parent / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                default_config = json.load(f)
+        except Exception:
+            pass  # 使用默认配置
+
     # 兼容不同版本的Gradio
     try:
         demo = gr.Blocks(title="视频中文字幕工具 - 阿里云", theme=gr.themes.Soft())
@@ -299,6 +317,7 @@ def create_interface():
 
                 video_input = gr.Textbox(
                     label="视频文件路径",
+                    value=default_config.get("video_path", ""),
                     placeholder=r"例如: C:\Users\YourName\Videos\video.mp4",
                     info="输入完整的视频文件路径"
                 )
@@ -307,29 +326,33 @@ def create_interface():
 
                 access_key_id_input = gr.Textbox(
                     label="AccessKey ID",
+                    value=default_config.get("access_key_id", ""),
                     placeholder="您的阿里云AccessKey ID",
                     type="password"
                 )
 
                 access_key_secret_input = gr.Textbox(
                     label="AccessKey Secret",
+                    value=default_config.get("access_key_secret", ""),
                     placeholder="您的阿里云AccessKey Secret",
                     type="password"
                 )
 
                 app_key_input = gr.Textbox(
                     label="语音识别AppKey",
+                    value=default_config.get("app_key", ""),
                     placeholder="语音识别应用的AppKey"
                 )
 
                 bucket_name_input = gr.Textbox(
                     label="OSS存储桶名称",
+                    value=default_config.get("bucket_name", ""),
                     placeholder="例如: my-bucket"
                 )
 
                 region_input = gr.Textbox(
                     label="地域",
-                    value="cn-shanghai",
+                    value=default_config.get("region", "cn-shanghai"),
                     placeholder="例如: cn-shanghai"
                 )
 
@@ -340,6 +363,7 @@ def create_interface():
 
                 status_output = gr.Textbox(
                     label="处理状态",
+                    lines=8,
                     interactive=False
                 )
 
@@ -352,42 +376,6 @@ def create_interface():
                     label="字幕文件（SRT格式）",
                     interactive=False
                 )
-
-        gr.Markdown("""
-        ---
-        ### 💡 使用说明
-
-        1. **视频文件路径**：输入要添加字幕的视频文件的完整路径
-        2. **阿里云配置**：
-           - **AccessKey ID & Secret**：在阿里云控制台获取
-           - **语音识别AppKey**：在语音识别服务控制台创建应用后获取
-           - **OSS存储桶名称**：需要一个OSS存储桶用于临时存储音频文件
-           - **地域**：选择与OSS存储桶相同的地域（默认：cn-shanghai）
-        3. 点击"开始处理"按钮，等待处理完成
-        4. 处理完成后，可以下载带字幕的视频和字幕文件
-
-        ### 📋 处理流程
-
-        1. 从视频中提取音频
-        2. 上传音频到阿里云OSS
-        3. 提交语音识别任务到阿里云
-        4. 等待识别完成（可能需要几分钟）
-        5. 生成SRT格式字幕文件
-        6. 使用FFmpeg将字幕烧录到视频中
-
-        ### ⚠️ 注意事项
-
-        - 确保已安装FFmpeg
-        - 需要有效的阿里云账号和语音识别服务权限
-        - 处理时间取决于视频长度和网络速度
-        - 音频文件会临时上传到OSS，处理完成后自动删除
-
-        ### 🔗 相关链接
-
-        - [阿里云语音识别服务](https://www.aliyun.com/product/nls)
-        - [如何获取AccessKey](https://help.aliyun.com/document_detail/53045.html)
-        - [如何创建OSS存储桶](https://help.aliyun.com/document_detail/31885.html)
-        """)
 
         # 绑定处理函数
         process_btn.click(

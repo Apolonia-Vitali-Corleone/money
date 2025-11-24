@@ -5,6 +5,7 @@ anr.mp4
 
 AccessKey.csv
 .env
+config.json
 
 # Python缓存
 __pycache__/
