@@ -157,7 +157,12 @@ class AliyunTranscription:
         # 发送请求
         try:
             postResponse = self.client.do_action_with_exception(postRequest)
-            postResponse = json.loads(postResponse)
+            # 处理不同类型的响应（兼容不同SDK版本）
+            if isinstance(postResponse, bytes):
+                postResponse = json.loads(postResponse.decode('utf-8'))
+            elif isinstance(postResponse, str):
+                postResponse = json.loads(postResponse)
+            # 如果已经是dict，直接使用
             print(f"  服务器响应: {postResponse}")
 
             statusText = postResponse.get(self.KEY_STATUS_TEXT)
@@ -208,7 +213,12 @@ class AliyunTranscription:
 
             try:
                 getResponse = self.client.do_action_with_exception(getRequest)
-                getResponse = json.loads(getResponse)
+                # 处理不同类型的响应（兼容不同SDK版本）
+                if isinstance(getResponse, bytes):
+                    getResponse = json.loads(getResponse.decode('utf-8'))
+                elif isinstance(getResponse, str):
+                    getResponse = json.loads(getResponse)
+                # 如果已经是dict，直接使用
                 print(f"  查询结果: {getResponse}")
 
                 statusText = getResponse.get(self.KEY_STATUS_TEXT)

@@ -61,8 +61,16 @@ def extract_audio(video_path, audio_path):
 
 def parse_result_to_srt(result_json, srt_path):
     """将阿里云识别结果转换为SRT字幕格式"""
-    # 解析JSON结果
-    result = json.loads(result_json)
+    # 解析JSON结果（兼容不同的数据类型）
+    if isinstance(result_json, dict):
+        result = result_json
+    elif isinstance(result_json, str):
+        result = json.loads(result_json)
+    elif isinstance(result_json, bytes):
+        result = json.loads(result_json.decode('utf-8'))
+    else:
+        raise TypeError(f"不支持的结果类型: {type(result_json)}")
+
     sentences = result.get('Sentences', [])
 
     if not sentences:
