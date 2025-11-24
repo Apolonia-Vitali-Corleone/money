@@ -23,34 +23,8 @@ except ImportError:
 
 
 def check_network_connectivity(region='cn-shanghai'):
-    """检查与阿里云服务的网络连接"""
-    print("🔍 检查网络连接...")
-
-    # 检查DNS解析
-    nls_domain = f'nls-filetrans.{region}.aliyuncs.com'
-    oss_domain = f'oss-{region}.aliyuncs.com'
-
-    try:
-        print(f"  检查DNS解析: {nls_domain}")
-        ip = socket.gethostbyname(nls_domain)
-        print(f"  ✓ NLS服务DNS解析成功: {ip}")
-    except socket.gaierror as e:
-        print(f"  ❌ NLS服务DNS解析失败: {e}")
-        print(f"\n可能的原因：")
-        print(f"  1. 网络连接问题 - 请检查网络连接是否正常")
-        print(f"  2. DNS服务器问题 - 尝试更换DNS服务器（如8.8.8.8）")
-        print(f"  3. 防火墙/代理 - 检查防火墙或代理设置")
-        print(f"  4. 地域设置错误 - 当前地域: {region}")
-        raise Exception(f"无法解析阿里云NLS服务域名: {nls_domain}")
-
-    try:
-        print(f"  检查DNS解析: {oss_domain}")
-        ip = socket.gethostbyname(oss_domain)
-        print(f"  ✓ OSS服务DNS解析成功: {ip}")
-    except socket.gaierror as e:
-        print(f"  ⚠ OSS服务DNS解析失败: {e}")
-
-    print("  ✓ 网络连接检查完成\n")
+    """检查与阿里云服务的网络连接（已禁用DNS预检查）"""
+    print("🔍 跳过DNS预检查，直接连接阿里云服务...\n")
 
 
 def extract_audio(video_path, audio_path):
