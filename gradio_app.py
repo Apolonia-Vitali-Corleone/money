@@ -89,7 +89,7 @@ def submit_transcription_task(file_url, access_key_id, access_key_secret, app_ke
             # 创建POST请求
             request = CommonRequest()
             request.set_method('POST')
-            request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
+            request.set_domain(f'filetrans.{region}.aliyuncs.com')
             request.set_version('2018-08-17')
             request.set_action_name('SubmitTask')
             request.set_protocol_type('https')
@@ -146,7 +146,7 @@ def wait_for_task_completion(task_id, access_key_id, access_key_secret, region='
                 # 创建GET请求
                 request = CommonRequest()
                 request.set_method('GET')
-                request.set_domain(f'nls-filetrans.{region}.aliyuncs.com')
+                request.set_domain(f'filetrans.{region}.aliyuncs.com')
                 request.set_version('2018-08-17')
                 request.set_action_name('GetTaskResult')
                 request.set_protocol_type('https')
