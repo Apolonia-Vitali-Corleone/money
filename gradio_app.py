@@ -14,6 +14,10 @@ import tempfile
 import socket
 from pathlib import Path
 import gradio as gr
+from dotenv import load_dotenv
+
+# 加载 .env 文件中的环境变量
+load_dotenv()
 
 try:
     from aliyunsdkcore.client import AcsClient
