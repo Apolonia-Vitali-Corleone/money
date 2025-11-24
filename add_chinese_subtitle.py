@@ -63,8 +63,10 @@ def upload_to_oss(audio_path, access_key_id, access_key_secret, bucket_name, reg
     # 上传文件
     bucket.put_object_from_file(object_name, audio_path)
 
-    # 生成文件URL
-    file_url = f"https://{bucket_name}.oss-{region}.aliyuncs.com/{object_name}"
+    # 生成带签名的临时访问URL（有效期1小时）
+    # 使用签名URL可以让语音识别服务访问私有OSS文件
+    file_url = bucket.sign_url('GET', object_name, 3600)
+    print(f"✓ 文件已上传: {object_name}")
     return file_url, object_name
 
 
