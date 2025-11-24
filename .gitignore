@@ -3,6 +3,9 @@
 anr_audio.wav
 anr.mp4
 
+AccessKey.csv
+.env
+
 # Python缓存
 __pycache__/
 *.py[cod]
