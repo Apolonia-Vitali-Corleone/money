@@ -45,7 +45,7 @@ class AliyunTranscription:
     STATUS_RUNNING = "RUNNING"
     STATUS_QUEUEING = "QUEUEING"
 
-    def __init__(self, access_key_id, access_key_secret, app_key, bucket_name, region="cn-shanghai"):
+    def __init__(self, access_key_id, access_key_secret, app_key, bucket_name, region="cn-shanghai", language="zh"):
         """
         初始化阿里云语音识别客户端
 
@@ -55,12 +55,14 @@ class AliyunTranscription:
             app_key: 语音识别应用AppKey
             bucket_name: OSS存储桶名称
             region: 地域（默认: cn-shanghai）
+            language: 识别语言（zh=中文, en=英语，默认: zh）
         """
         self.access_key_id = access_key_id
         self.access_key_secret = access_key_secret
         self.app_key = app_key
         self.bucket_name = bucket_name
         self.region = region
+        self.language = language
 
         # 更新地域相关的常量
         if region != "cn-shanghai":
@@ -126,7 +128,7 @@ class AliyunTranscription:
 
     def submit_task(self, file_url):
         """
-        提交录音文件识别请求（按照官方示例）
+        提交录音文件识别请求（按照官方示例 + 高级参数优化）
 
         Args:
             file_url: 音频文件的URL
@@ -142,13 +144,27 @@ class AliyunTranscription:
         postRequest.set_action_name(self.POST_REQUEST_ACTION)
         postRequest.set_method('POST')
 
-        # 设置任务参数（按照官方示例格式）
+        # 设置任务参数（优化版，添加高级参数提升识别质量）
         task = {
             self.KEY_APP_KEY: self.app_key,
             self.KEY_FILE_LINK: file_url,
             self.KEY_VERSION: "4.0",
-            self.KEY_ENABLE_WORDS: False
+            self.KEY_ENABLE_WORDS: True,  # 启用词级别识别（更精确的时间戳）
+            "enable_inverse_text_normalization": True,  # 数字/时间格式化（12点 → 12:00）
+            "enable_punctuation_prediction": True,      # 自动标点符号
+            "enable_semantic_sentence_detection": True, # 语义断句（更自然）
+            "disfluency_removal": False,                # 不删除口语词（保持原意）
+            "max_single_segment_time": 15000,           # 最长单句15秒（默认10秒，适合长句）
         }
+
+        # 根据语言添加特定参数
+        if self.language == "en":
+            # 英语识别优化
+            task["language_hints"] = ["en-US"]  # 明确指定英语
+            print("  语言设置: 英语 (en-US)")
+        else:
+            # 中文识别（默认）
+            print("  语言设置: 中文 (默认)")
 
         task_json = json.dumps(task)
         print(f"  提交任务参数: {task_json}")
