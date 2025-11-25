@@ -155,6 +155,7 @@ class AliyunTranscription:
             "enable_semantic_sentence_detection": True, # 语义断句（更自然）
             "disfluency_removal": False,                # 不删除口语词（保持原意）
             "max_single_segment_time": 15000,           # 最长单句15秒（默认10秒，适合长句）
+            "enable_speaker_diarization": True,         # 启用说话人分离（区分不同说话者）
         }
 
         # 根据语言添加特定参数

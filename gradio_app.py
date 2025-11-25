@@ -62,7 +62,7 @@ def extract_audio(video_path, audio_path):
 
 
 def parse_result_to_srt(result_json, srt_path):
-    """将阿里云识别结果转换为SRT字幕格式"""
+    """将阿里云识别结果转换为SRT字幕格式（支持说话人分离）"""
     # 解析JSON结果（兼容不同的数据类型）
     if isinstance(result_json, dict):
         result = result_json
@@ -78,21 +78,55 @@ def parse_result_to_srt(result_json, srt_path):
     if not sentences:
         raise Exception("识别结果为空，可能音频没有语音内容")
 
+    # 处理说话人分离：当说话人切换时，自动分段
+    merged_segments = []
+    current_segment = None
+
+    for sentence in sentences:
+        # 获取时间戳和文本
+        begin_time = sentence['BeginTime'] / 1000  # 转换为秒
+        end_time = sentence['EndTime'] / 1000
+        text = sentence['Text']
+
+        # 获取说话人ID（如果启用了说话人分离）
+        speaker_id = sentence.get('SpeakerId') or sentence.get('ChannelId')
+
+        # 如果没有当前段，或说话人切换了，创建新段
+        if current_segment is None or (speaker_id and speaker_id != current_segment.get('speaker_id')):
+            if current_segment:
+                merged_segments.append(current_segment)
+            current_segment = {
+                'begin_time': begin_time,
+                'end_time': end_time,
+                'text': text,
+                'speaker_id': speaker_id
+            }
+        else:
+            # 同一说话人，合并到当前段（但保持独立，便于区分）
+            # 为了清晰，每句话仍然独立成段
+            merged_segments.append(current_segment)
+            current_segment = {
+                'begin_time': begin_time,
+                'end_time': end_time,
+                'text': text,
+                'speaker_id': speaker_id
+            }
+
+    # 添加最后一段
+    if current_segment:
+        merged_segments.append(current_segment)
+
+    # 写入SRT文件
     with open(srt_path, 'w', encoding='utf-8') as f:
-        for i, sentence in enumerate(sentences, 1):
-            # 获取时间戳（单位：毫秒）
-            begin_time = sentence['BeginTime'] / 1000  # 转换为秒
-            end_time = sentence['EndTime'] / 1000
-            text = sentence['Text']
-
+        for i, segment in enumerate(merged_segments, 1):
             # 格式化时间戳
-            start = format_timestamp(begin_time)
-            end = format_timestamp(end_time)
+            start = format_timestamp(segment['begin_time'])
+            end = format_timestamp(segment['end_time'])
 
-            # 写入SRT格式
+            # 写入SRT格式（不显示说话人标签，只通过分段区分）
             f.write(f"{i}\n")
             f.write(f"{start} --> {end}\n")
-            f.write(f"{text}\n\n")
+            f.write(f"{segment['text']}\n\n")
 
 
 def format_timestamp(seconds):
