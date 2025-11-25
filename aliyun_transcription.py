@@ -276,12 +276,12 @@ class AliyunTranscription:
         task_id = self.submit_task(file_url)
 
         # 步骤2: 等待任务完成
-        # 动态计算超时时间：音频时长 × 3 + 60秒缓冲，最小120秒，最大600秒
+        # 动态计算超时时间：音频时长 × 3 + 60秒缓冲，最小120秒，最大3600秒（60分钟）
         if audio_duration:
-            max_wait_time = max(120, min(600, int(audio_duration * 3 + 60)))
+            max_wait_time = max(120, min(3600, int(audio_duration * 3 + 60)))
             print(f"  音频时长: {audio_duration:.1f}秒，设置超时: {max_wait_time}秒")
         else:
-            max_wait_time = 300  # 默认5分钟
+            max_wait_time = 600  # 默认10分钟
             print(f"  未获取音频时长，使用默认超时: {max_wait_time}秒")
 
         result = self.get_task_result(task_id, max_wait_time=max_wait_time, poll_interval=10)
