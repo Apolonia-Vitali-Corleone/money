@@ -44,12 +44,14 @@ def get_audio_duration(audio_path):
 
 
 def extract_audio(video_path, audio_path):
-    """从视频中提取音频为MP3格式"""
+    """从视频中提取音频为MP3格式（高质量设置）"""
     cmd = [
         'ffmpeg', '-i', video_path,
         '-vn', '-acodec', 'libmp3lame',
-        '-ar', '16000', '-ac', '1',
-        '-b:a', '64k',
+        '-ar', '16000',  # 阿里云要求8000-48000Hz，16000是语音识别的标准采样率
+        '-ac', '1',      # 单声道（语音识别推荐）
+        '-b:a', '128k',  # 提高比特率到128k，保留更多音频细节
+        '-q:a', '2',     # MP3质量等级（0-9，2为高质量）
         audio_path, '-y'
     ]
     result = subprocess.run(cmd, capture_output=True)
@@ -129,7 +131,7 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
 
 
 
-def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_name, region, progress=gr.Progress()):
+def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_name, region, language, progress=gr.Progress()):
     """
     处理视频的主函数
 
@@ -140,6 +142,7 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         app_key: 语音识别应用AppKey
         bucket_name: OSS存储桶名称
         region: 地域
+        language: 识别语言（zh=中文, en=英语）
         progress: Gradio进度条
 
     Returns:
@@ -159,33 +162,41 @@ def process_video(video_path, access_key_id, access_key_secret, app_key, bucket_
         base_name = Path(video_path).stem
         temp_dir = tempfile.mkdtemp()
         audio_path = os.path.join(temp_dir, f"{base_name}_audio.mp3")
-        srt_path = os.path.join(temp_dir, f"{base_name}_zh.srt")
+        lang_suffix = "en" if language == "en" else "zh"
+        srt_path = os.path.join(temp_dir, f"{base_name}_{lang_suffix}.srt")
         output_path = os.path.join(temp_dir, f"{base_name}_字幕版.mp4")
 
         # 创建阿里云语音识别客户端
-        progress(0.05, desc="[0/5] 初始化阿里云客户端...")
+        lang_name = "英语 (English)" if language == "en" else "中文 (Chinese)"
+        progress(0.05, desc=f"[0/5] 初始化阿里云客户端（{lang_name}）...")
         transcription = AliyunTranscription(
             access_key_id=access_key_id,
             access_key_secret=access_key_secret,
             app_key=app_key,
             bucket_name=bucket_name,
-            region=region
+            region=region,
+            language=language
         )
 
-        # 步骤1: 提取音频
-        progress(0.1, desc="[1/5] 提取音频...")
-        extract_audio(video_path, audio_path)
-
-        # 获取音频时长（用于动态设置超时）
-        audio_duration = get_audio_duration(audio_path)
-
-        # 步骤2: 生成固定的OSS对象名称（基于视频文件哈希）
-        progress(0.2, desc="[2/5] 准备上传音频...")
+        # 步骤1: 生成固定的OSS对象名称并检查
+        progress(0.1, desc="[1/5] 检查云端是否已有音频...")
         object_name = transcription.get_audio_object_name(video_path)
 
-        # 步骤3: 上传到OSS（如果已存在则跳过）
-        progress(0.25, desc="[3/5] 上传音频到OSS...")
-        file_url = transcription.upload_audio_to_oss(audio_path, object_name)
+        # 步骤2: 检查OSS是否已存在，避免重复提取和上传
+        audio_duration = None
+        if transcription.bucket.object_exists(object_name):
+            progress(0.2, desc="✓ 音频已存在，跳过提取和上传")
+            file_url = transcription.bucket.sign_url('GET', object_name, 3600)
+        else:
+            # 提取音频
+            progress(0.15, desc="[2/5] 提取音频...")
+            extract_audio(video_path, audio_path)
+            audio_duration = get_audio_duration(audio_path)
+
+            # 上传到OSS
+            progress(0.2, desc="[3/5] 上传音频到OSS...")
+            transcription.bucket.put_object_from_file(object_name, audio_path)
+            file_url = transcription.bucket.sign_url('GET', object_name, 3600)
 
         # 步骤4: 提交识别任务并等待完成
         progress(0.3, desc="[4/5] 提交识别任务...")
@@ -240,9 +251,9 @@ def create_interface():
 
     with demo:
         gr.Markdown("""
-        # 🎬 视频中文字幕工具
+        # 🎬 视频字幕工具
 
-        自动为视频添加中文字幕，使用阿里云语音识别服务
+        自动为视频添加字幕，支持中文和英语识别（阿里云语音识别服务）
         """)
 
         with gr.Row():
@@ -254,6 +265,13 @@ def create_interface():
                     value=default_config.get("video_path"),
                     placeholder=r"例如: C:\Users\YourName\Videos\video.mp4",
                     info="输入完整的视频文件路径"
+                )
+
+                language_input = gr.Radio(
+                    label="识别语言",
+                    choices=[("中文 (Chinese)", "zh"), ("英语 (English)", "en")],
+                    value="zh",
+                    info="选择视频中的音频语言"
                 )
 
                 gr.Markdown("### 🔑 阿里云配置")
@@ -320,7 +338,8 @@ def create_interface():
                 access_key_secret_input,
                 app_key_input,
                 bucket_name_input,
-                region_input
+                region_input,
+                language_input
             ],
             outputs=[video_output, srt_output, status_output]
         )

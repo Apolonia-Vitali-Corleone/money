@@ -19,13 +19,15 @@ except ImportError:
 
 
 def extract_audio(video_path, audio_path):
-    """从视频中提取音频为MP3格式"""
+    """从视频中提取音频为MP3格式（高质量设置）"""
     print("[1/5] 提取音频...")
     cmd = [
         'ffmpeg', '-i', video_path,
         '-vn', '-acodec', 'libmp3lame',
-        '-ar', '16000', '-ac', '1',
-        '-b:a', '64k',
+        '-ar', '16000',  # 阿里云要求8000-48000Hz，16000是语音识别的标准采样率
+        '-ac', '1',      # 单声道（语音识别推荐）
+        '-b:a', '128k',  # 提高比特率到128k，保留更多音频细节
+        '-q:a', '2',     # MP3质量等级（0-9，2为高质量）
         audio_path, '-y'
     ]
     result = subprocess.run(cmd, capture_output=True)
@@ -126,12 +128,14 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
 def main():
     if len(sys.argv) < 2:
         print("=" * 60)
-        print("视频中文字幕工具 - 使用阿里云语音识别服务")
+        print("视频字幕工具 - 使用阿里云语音识别服务")
         print("=" * 60)
         print("\n用法:")
-        print("  python add_chinese_subtitle.py <视频文件路径>\n")
+        print("  python add_chinese_subtitle.py <视频文件路径> [语言]\n")
         print("示例:")
-        print("  python add_chinese_subtitle.py video.mp4\n")
+        print("  python add_chinese_subtitle.py video.mp4         # 中文识别（默认）")
+        print("  python add_chinese_subtitle.py video.mp4 zh      # 中文识别")
+        print("  python add_chinese_subtitle.py video.mp4 en      # 英语识别\n")
         print("环境变量配置:")
         print("  ALIBABA_ACCESS_KEY_ID      - 阿里云AccessKey ID")
         print("  ALIBABA_ACCESS_KEY_SECRET  - 阿里云AccessKey Secret")
@@ -142,6 +146,12 @@ def main():
         sys.exit(1)
 
     video_path = sys.argv[1]
+    language = sys.argv[2] if len(sys.argv) > 2 else 'zh'  # 默认中文
+
+    # 验证语言参数
+    if language not in ['zh', 'en']:
+        print(f"❌ 错误: 不支持的语言 '{language}'，请使用 'zh'（中文）或 'en'（英语）")
+        sys.exit(1)
 
     # 验证视频文件
     if not os.path.exists(video_path):
@@ -180,13 +190,15 @@ def main():
     # 设置输出路径
     base_name = Path(video_path).stem
     audio_path = f"{base_name}_audio.mp3"
-    srt_path = f"{base_name}_zh.srt"
+    lang_suffix = "en" if language == "en" else "zh"
+    srt_path = f"{base_name}_{lang_suffix}.srt"
     output_path = f"{base_name}_字幕版.mp4"
 
     print("\n" + "=" * 60)
     print("开始处理视频...")
     print("=" * 60)
     print(f"输入视频: {video_path}")
+    print(f"识别语言: {'英语 (English)' if language == 'en' else '中文 (Chinese)'}")
     print(f"输出视频: {output_path}")
     print(f"字幕文件: {srt_path}")
     print("=" * 60 + "\n")
@@ -198,26 +210,38 @@ def main():
             access_key_secret=access_key_secret,
             app_key=app_key,
             bucket_name=bucket_name,
-            region=region
+            region=region,
+            language=language
         )
 
-        # 步骤1: 提取音频
-        extract_audio(video_path, audio_path)
-
-        # 获取音频时长（用于动态设置超时）
-        audio_duration = get_audio_duration(audio_path)
-
-        # 步骤2: 生成固定的OSS对象名称（基于视频文件哈希）
-        print("[2/5] 准备上传音频到阿里云OSS...")
+        # 步骤1: 生成固定的OSS对象名称（基于视频文件哈希）
+        print("[1/5] 检查云端是否已有音频文件...")
         object_name = transcription.get_audio_object_name(video_path)
         print(f"  OSS对象名称: {object_name}")
 
-        # 步骤3: 上传到OSS（如果已存在则跳过）
-        file_url = transcription.upload_audio_to_oss(audio_path, object_name)
+        # 步骤2: 检查OSS是否已存在，避免重复提取和上传
+        audio_duration = None
+        if transcription.bucket.object_exists(object_name):
+            print("  ✓ 音频文件已存在于OSS，跳过提取和上传")
+            # 直接生成访问URL
+            file_url = transcription.bucket.sign_url('GET', object_name, 3600)
+        else:
+            print("[2/5] 提取音频...")
+            # 提取音频
+            extract_audio(video_path, audio_path)
+            # 获取音频时长（用于动态设置超时）
+            audio_duration = get_audio_duration(audio_path)
+
+            # 步骤3: 上传到OSS
+            print("[3/5] 上传音频到OSS...")
+            transcription.bucket.put_object_from_file(object_name, audio_path)
+            print(f"  ✓ 音频文件已上传: {object_name}")
+            file_url = transcription.bucket.sign_url('GET', object_name, 3600)
+
         print(f"  文件URL: {file_url[:80]}...")
 
         # 步骤4: 提交识别任务并等待完成
-        print("[3/5] 提交语音识别任务...")
+        print("[4/5] 提交语音识别任务...")
         result_json = transcription.transcribe_file(file_url, audio_duration)
 
         # 步骤5: 生成SRT字幕文件
