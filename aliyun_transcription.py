@@ -81,11 +81,24 @@ class AliyunTranscription:
         计算文件的MD5哈希值
         用于生成唯一的文件标识
         """
+        start_time = time.time()
+        file_size = os.path.getsize(file_path)
+        print(f"  正在计算文件哈希值... (文件大小: {file_size / 1024 / 1024:.2f} MB)")
+
         hasher = hashlib.md5()
+        processed = 0
         with open(file_path, 'rb') as f:
             # 分块读取，避免大文件占用过多内存
             for chunk in iter(lambda: f.read(4096), b""):
                 hasher.update(chunk)
+                processed += len(chunk)
+                # 每处理10MB显示一次进度
+                if processed % (10 * 1024 * 1024) == 0:
+                    progress = processed / file_size * 100
+                    print(f"    进度: {progress:.1f}% ({processed / 1024 / 1024:.2f}/{file_size / 1024 / 1024:.2f} MB)")
+
+        elapsed = time.time() - start_time
+        print(f"  ✓ 哈希计算完成，耗时: {elapsed:.2f}秒")
         return hasher.hexdigest()
 
     def get_audio_object_name(self, video_path):
@@ -113,13 +126,17 @@ class AliyunTranscription:
         Returns:
             file_url: 带签名的临时访问URL
         """
+        start_time = time.time()
         # 检查文件是否已存在
         if self.bucket.object_exists(object_name):
             print(f"  音频文件已存在于OSS，跳过上传: {object_name}")
         else:
             # 上传文件
+            file_size = os.path.getsize(audio_path)
+            print(f"  正在上传音频文件... (大小: {file_size / 1024 / 1024:.2f} MB)")
             self.bucket.put_object_from_file(object_name, audio_path)
-            print(f"  音频文件已上传: {object_name}")
+            elapsed = time.time() - start_time
+            print(f"  ✓ 音频文件已上传: {object_name}，耗时: {elapsed:.2f}秒")
 
         # 生成带签名的临时访问URL（有效期1小时）
         # 使用签名URL可以让语音识别服务访问私有OSS文件
@@ -136,6 +153,9 @@ class AliyunTranscription:
         Returns:
             task_id: 任务ID
         """
+        start_time = time.time()
+        print(f"  正在准备识别任务... (时间: {time.strftime('%H:%M:%S')})")
+
         # 创建POST请求
         postRequest = CommonRequest()
         postRequest.set_domain(self.DOMAIN)
@@ -172,6 +192,7 @@ class AliyunTranscription:
 
         # 发送请求
         try:
+            print("  正在提交到阿里云服务器...")
             postResponse = self.client.do_action_with_exception(postRequest)
             # 处理不同类型的响应（兼容不同SDK版本）
             if isinstance(postResponse, bytes):
@@ -183,8 +204,9 @@ class AliyunTranscription:
 
             statusText = postResponse.get(self.KEY_STATUS_TEXT)
             if statusText == self.STATUS_SUCCESS:
-                print("  ✓ 录音文件识别请求成功响应！")
+                elapsed = time.time() - start_time
                 taskId = postResponse.get(self.KEY_TASK_ID)
+                print(f"  ✓ 录音文件识别请求成功响应！任务ID: {taskId}，耗时: {elapsed:.2f}秒")
                 return taskId
             else:
                 raise Exception(f"录音文件识别请求失败: {statusText}")
@@ -206,6 +228,11 @@ class AliyunTranscription:
         Returns:
             result: 识别结果JSON字符串
         """
+        print(f"\n  开始等待识别结果... (任务ID: {task_id})")
+        print(f"  最大等待时间: {max_wait_time}秒 ({max_wait_time / 60:.1f}分钟)")
+        print(f"  轮询间隔: {poll_interval}秒")
+        print(f"  开始时间: {time.strftime('%H:%M:%S')}\n")
+
         # 创建GET请求
         getRequest = CommonRequest()
         getRequest.set_domain(self.DOMAIN)
@@ -220,6 +247,7 @@ class AliyunTranscription:
         # 或者为错误描述，则结束轮询
         start_time = time.time()
         statusText = ""
+        poll_count = 0
 
         while True:
             # 检查是否超时
@@ -228,6 +256,7 @@ class AliyunTranscription:
                 raise Exception(f"识别任务超时（等待时间超过{max_wait_time}秒）")
 
             try:
+                poll_count += 1
                 getResponse = self.client.do_action_with_exception(getRequest)
                 # 处理不同类型的响应（兼容不同SDK版本）
                 if isinstance(getResponse, bytes):
@@ -235,28 +264,32 @@ class AliyunTranscription:
                 elif isinstance(getResponse, str):
                     getResponse = json.loads(getResponse)
                 # 如果已经是dict，直接使用
-                print(f"  查询结果: {getResponse}")
 
                 statusText = getResponse.get(self.KEY_STATUS_TEXT)
 
                 if statusText == self.STATUS_RUNNING or statusText == self.STATUS_QUEUEING:
                     # 继续轮询
-                    print(f"  任务状态: {statusText}, 等待中... ({int(elapsed_time)}秒/{max_wait_time}秒)")
+                    progress_percent = (elapsed_time / max_wait_time) * 100
+                    status_text = "排队中" if statusText == self.STATUS_QUEUEING else "识别中"
+                    print(f"  [{time.strftime('%H:%M:%S')}] 第{poll_count}次查询 - 状态: {status_text} | 已等待: {int(elapsed_time)}秒 / {max_wait_time}秒 ({progress_percent:.1f}%)")
                     time.sleep(poll_interval)
                 else:
                     # 退出轮询
                     break
 
             except ServerException as e:
-                print(f"  服务器错误: {e}")
+                print(f"  [{time.strftime('%H:%M:%S')}] 服务器错误: {e}，将在{poll_interval}秒后重试...")
                 time.sleep(poll_interval)
             except ClientException as e:
-                print(f"  客户端错误: {e}")
+                print(f"  [{time.strftime('%H:%M:%S')}] 客户端错误: {e}，将在{poll_interval}秒后重试...")
                 time.sleep(poll_interval)
 
         # 检查最终状态
+        total_elapsed = time.time() - start_time
         if statusText == self.STATUS_SUCCESS:
-            print("  ✓ 录音文件识别成功！")
+            print(f"\n  ✓ 录音文件识别成功！")
+            print(f"  总耗时: {total_elapsed:.2f}秒 ({total_elapsed / 60:.1f}分钟)")
+            print(f"  完成时间: {time.strftime('%H:%M:%S')}\n")
             return getResponse.get(self.KEY_RESULT)
         else:
             raise Exception(f"录音文件识别失败: {statusText}")
