@@ -8,6 +8,7 @@
 import os
 import sys
 import subprocess
+import time
 from pathlib import Path
 
 try:
@@ -20,7 +21,12 @@ except ImportError:
 
 def extract_audio(video_path, audio_path):
     """从视频中提取音频为MP3格式（高质量设置）"""
-    print("[1/5] 提取音频...")
+    print("  提取音频...")
+    print(f"  开始时间: {time.strftime('%H:%M:%S')}")
+    print(f"  输入文件: {video_path}")
+    print(f"  输出文件: {audio_path}")
+
+    start_time = time.time()
     cmd = [
         'ffmpeg', '-i', video_path,
         '-vn', '-acodec', 'libmp3lame',
@@ -30,9 +36,15 @@ def extract_audio(video_path, audio_path):
         '-q:a', '2',     # MP3质量等级（0-9，2为高质量）
         audio_path, '-y'
     ]
+    print("  正在执行FFmpeg音频提取...")
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0:
         raise Exception(f"FFmpeg提取音频失败: {result.stderr.decode()}")
+
+    elapsed = time.time() - start_time
+    audio_size = os.path.getsize(audio_path) / 1024 / 1024
+    print(f"  ✓ 音频提取完成，耗时: {elapsed:.2f}秒")
+    print(f"  音频文件大小: {audio_size:.2f} MB")
 
 
 def get_audio_duration(audio_path):
@@ -50,7 +62,9 @@ def get_audio_duration(audio_path):
 
 def parse_result_to_srt(result_json, srt_path):
     """将阿里云识别结果转换为SRT字幕格式"""
-    print("[5/5] 生成SRT字幕文件...")
+    print("  生成SRT字幕文件...")
+    print(f"  开始时间: {time.strftime('%H:%M:%S')}")
+    start_time = time.time()
 
     import json
     # 解析JSON结果（兼容不同的数据类型）
@@ -68,6 +82,8 @@ def parse_result_to_srt(result_json, srt_path):
     if not sentences:
         raise Exception("识别结果为空，可能音频没有语音内容")
 
+    print(f"  识别到 {len(sentences)} 条字幕")
+
     with open(srt_path, 'w', encoding='utf-8') as f:
         for i, sentence in enumerate(sentences, 1):
             # 获取时间戳（单位：毫秒）
@@ -84,7 +100,15 @@ def parse_result_to_srt(result_json, srt_path):
             f.write(f"{start} --> {end}\n")
             f.write(f"{text}\n\n")
 
-    print(f"✓ 字幕文件已保存: {srt_path}")
+            # 每处理100条字幕显示一次进度
+            if i % 100 == 0:
+                progress = i / len(sentences) * 100
+                print(f"    写入进度: {i}/{len(sentences)} ({progress:.1f}%)")
+
+    elapsed = time.time() - start_time
+    srt_size = os.path.getsize(srt_path) / 1024
+    print(f"  ✓ 字幕文件已保存: {srt_path}")
+    print(f"  文件大小: {srt_size:.2f} KB，耗时: {elapsed:.2f}秒")
 
 
 def format_timestamp(seconds):
@@ -98,7 +122,13 @@ def format_timestamp(seconds):
 
 def add_subtitle_to_video(video_path, srt_path, output_path):
     """将字幕烧录到视频中"""
-    print("\n将字幕烧录到视频中...")
+    print("\n  将字幕烧录到视频中...")
+    print(f"  开始时间: {time.strftime('%H:%M:%S')}")
+    print(f"  输入视频: {video_path}")
+    print(f"  字幕文件: {srt_path}")
+    print(f"  输出视频: {output_path}")
+
+    start_time = time.time()
 
     # 确保使用绝对路径
     srt_path_abs = os.path.abspath(srt_path)
@@ -114,6 +144,9 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
         srt_path_escaped = srt_path_abs.replace(':', r'\:')
         filter_str = f"subtitles='{srt_path_escaped}'"
 
+    print("  正在执行FFmpeg字幕烧录...")
+    print("  (这个过程可能需要较长时间，请耐心等待)")
+
     cmd = [
         'ffmpeg', '-i', video_path,
         '-vf', filter_str,
@@ -123,6 +156,11 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise Exception(f"FFmpeg烧录字幕失败: {result.stderr}")
+
+    elapsed = time.time() - start_time
+    output_size = os.path.getsize(output_path) / 1024 / 1024
+    print(f"  ✓ 字幕烧录完成，耗时: {elapsed:.2f}秒 ({elapsed / 60:.1f}分钟)")
+    print(f"  输出文件大小: {output_size:.2f} MB")
 
 
 
@@ -189,21 +227,33 @@ def main():
         print("  export ALIBABA_OSS_BUCKET='your_bucket_name'")
         sys.exit(1)
 
-    # 设置输出路径
-    base_name = Path(video_path).stem
-    audio_path = f"{base_name}_audio.mp3"
+    # 设置输出路径 - 在视频文件的同名目录下
+    video_path_obj = Path(video_path).resolve()
+    base_name = video_path_obj.stem
+    video_dir = video_path_obj.parent
+
+    # 创建与视频文件同名的输出目录
+    output_dir = video_dir / base_name
+    output_dir.mkdir(exist_ok=True)
+
+    # 在输出目录下创建文件
+    audio_path = str(output_dir / f"{base_name}_audio.mp3")
     lang_suffix = "en" if language == "en" else "zh"
-    srt_path = f"{base_name}_{lang_suffix}.srt"
-    output_path = f"{base_name}_字幕版.mp4"
+    srt_path = str(output_dir / f"{base_name}_{lang_suffix}.srt")
+    output_path = str(output_dir / f"{base_name}_字幕版.mp4")
 
     print("\n" + "=" * 60)
     print("开始处理视频...")
     print("=" * 60)
     print(f"输入视频: {video_path}")
     print(f"识别语言: {'英语 (English)' if language == 'en' else '中文 (Chinese)'}")
+    print(f"输出目录: {output_dir}")
     print(f"输出视频: {output_path}")
     print(f"字幕文件: {srt_path}")
+    print(f"开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60 + "\n")
+
+    total_start_time = time.time()
 
     try:
         # 创建阿里云语音识别客户端
@@ -217,7 +267,7 @@ def main():
         )
 
         # 步骤1: 生成固定的OSS对象名称（基于视频文件哈希）
-        print("[1/5] 检查云端是否已有音频文件...")
+        print("[1/6] 检查云端是否已有音频文件...")
         object_name = transcription.get_audio_object_name(video_path)
         print(f"  OSS对象名称: {object_name}")
 
@@ -228,14 +278,14 @@ def main():
             # 直接生成访问URL
             file_url = transcription.bucket.sign_url('GET', object_name, 3600)
         else:
-            print("[2/5] 提取音频...")
+            print("[2/6] 提取音频...")
             # 提取音频
             extract_audio(video_path, audio_path)
             # 获取音频时长（用于动态设置超时）
             audio_duration = get_audio_duration(audio_path)
 
             # 步骤3: 上传到OSS
-            print("[3/5] 上传音频到OSS...")
+            print("\n[3/6] 上传音频到OSS...")
             transcription.bucket.put_object_from_file(object_name, audio_path)
             print(f"  ✓ 音频文件已上传: {object_name}")
             file_url = transcription.bucket.sign_url('GET', object_name, 3600)
@@ -243,28 +293,44 @@ def main():
         print(f"  文件URL: {file_url[:80]}...")
 
         # 步骤4: 提交识别任务并等待完成
-        print("[4/5] 提交语音识别任务...")
+        print("\n[4/6] 提交语音识别任务...")
         result_json = transcription.transcribe_file(file_url, audio_duration)
 
         # 步骤5: 生成SRT字幕文件
+        print("\n[5/6] 生成SRT字幕文件...")
         parse_result_to_srt(result_json, srt_path)
 
         # 步骤6: 将字幕烧录到视频
+        print("\n[6/6] 将字幕烧录到视频...")
         add_subtitle_to_video(video_path, srt_path, output_path)
 
         # 清理临时文件
         if os.path.exists(audio_path):
             os.remove(audio_path)
-            print("✓ 临时音频文件已清理")
+            print("\n✓ 临时音频文件已清理")
 
         # 可选：清理OSS文件（默认不清理，方便重复使用）
         # transcription.cleanup_oss_file(object_name)
 
+        # 计算总耗时
+        total_elapsed = time.time() - total_start_time
+        hours = int(total_elapsed // 3600)
+        minutes = int((total_elapsed % 3600) // 60)
+        seconds = int(total_elapsed % 60)
+
         print("\n" + "=" * 60)
         print("✓ 处理完成！")
         print("=" * 60)
+        print(f"输出目录: {output_dir}")
         print(f"输出视频: {output_path}")
         print(f"字幕文件: {srt_path}")
+        print(f"完成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        if hours > 0:
+            print(f"总耗时: {hours}小时{minutes}分钟{seconds}秒")
+        elif minutes > 0:
+            print(f"总耗时: {minutes}分钟{seconds}秒")
+        else:
+            print(f"总耗时: {seconds}秒")
         print("=" * 60 + "\n")
 
     except Exception as e:
