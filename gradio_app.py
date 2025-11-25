@@ -175,17 +175,20 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
     # 确保使用绝对路径
     srt_path_abs = os.path.abspath(srt_path)
 
-    # Windows路径转义：将反斜杠替换为正斜杠，转义冒号和特殊字符
+    # Windows路径转义：需要转义反斜杠和冒号
     if sys.platform.startswith('win'):
-        # Windows: 使用正斜杠，转义冒号
-        srt_path_escaped = srt_path_abs.replace('\\', '/').replace(':', '\\:')
+        # Windows: 先将反斜杠转为正斜杠，然后转义冒号
+        # 使用 filename= 参数来明确指定文件路径
+        srt_path_escaped = srt_path_abs.replace('\\', '/').replace(':', r'\:')
+        filter_str = f"subtitles=filename='{srt_path_escaped}'"
     else:
-        # Unix: 转义冒号和特殊字符
-        srt_path_escaped = srt_path_abs.replace(':', '\\:')
+        # Unix: 转义冒号
+        srt_path_escaped = srt_path_abs.replace(':', r'\:')
+        filter_str = f"subtitles='{srt_path_escaped}'"
 
     cmd = [
         'ffmpeg', '-i', video_path,
-        '-vf', f"subtitles={srt_path_escaped}",
+        '-vf', filter_str,
         '-c:a', 'copy',
         output_path, '-y'
     ]

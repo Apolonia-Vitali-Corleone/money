@@ -100,27 +100,29 @@ def add_subtitle_to_video(video_path, srt_path, output_path):
     """将字幕烧录到视频中"""
     print("\n将字幕烧录到视频中...")
 
-    # 转义字幕路径（Windows兼容）
-    # 将反斜杠替换为正斜杠
-    srt_path_normalized = srt_path.replace('\\', '/')
+    # 确保使用绝对路径
+    srt_path_abs = os.path.abspath(srt_path)
 
-    # Windows路径需要转义盘符冒号（C: → C\\:）
-    if len(srt_path_normalized) > 1 and srt_path_normalized[1] == ':':
-        # 盘符冒号需要双反斜杠转义
-        srt_path_escaped = srt_path_normalized[0] + '\\\\:' + srt_path_normalized[2:]
+    # Windows路径转义：需要转义反斜杠和冒号
+    if sys.platform.startswith('win'):
+        # Windows: 先将反斜杠转为正斜杠，然后转义冒号
+        # 使用 filename= 参数来明确指定文件路径
+        srt_path_escaped = srt_path_abs.replace('\\', '/').replace(':', r'\:')
+        filter_str = f"subtitles=filename='{srt_path_escaped}'"
     else:
-        # Unix路径或相对路径，转义所有冒号
-        srt_path_escaped = srt_path_normalized.replace(':', '\\:')
+        # Unix: 转义冒号
+        srt_path_escaped = srt_path_abs.replace(':', r'\:')
+        filter_str = f"subtitles='{srt_path_escaped}'"
 
     cmd = [
         'ffmpeg', '-i', video_path,
-        '-vf', f"subtitles={srt_path_escaped}",
+        '-vf', filter_str,
         '-c:a', 'copy',
         output_path, '-y'
     ]
-    result = subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise Exception(f"FFmpeg烧录字幕失败: {result.stderr.decode()}")
+        raise Exception(f"FFmpeg烧录字幕失败: {result.stderr}")
 
 
 
